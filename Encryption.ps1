@@ -1,4 +1,158 @@
 #----------------------------------------------------#
+# String Encryption Function
+# 	This function will take a string and, depending
+# 	on the parameters, encrypt the string against a
+#	certificate.
+#----------------------------------------------------#
+function New-EncryptedString
+{
+	<#
+	.EXAMPLE
+	
+	Run this function with these Params for encryption
+	against a new certificate that has yet to be created.
+
+	$params = @{
+		StringToEncrypt = 'String Goes Here'
+		CertSubject = 'Subject Name'
+		CertKeyLength = 2048
+		CertHashAlgorithm = 'SHA256'
+		CertKeyExportPolicy = '1'
+		CertExpirationInYears = 30
+		CertStoreLocation = 'Cert:\LocalMachine\My'
+		CertKeyUsage = 'KeyEncipherment'
+		CertKeyUsageProperty = 'All'
+		CertKeySpec = 'KeyExchange'
+		OutputLocation = "$env:USERPROFILE"
+		FileName = 'EncryptionInfo.csv'
+	}
+
+	New-EncryptedString @params
+
+	####################################################
+
+	Run this function with these Params for encryption
+	against an already existing certificate.
+
+	$params = @{
+		StringToEncrypt = 'String Goes Here'
+		CertStoreLocation = 'Cert:\LocalMachine\My'
+		CertThumbprint = 'Thumbprint goes here'
+		OutputLocation = "$env:USERPROFILE"
+		FileName = 'EncryptionInfo.csv'
+	}
+
+	New-EncryptedString @params
+	#>
+
+	[CmdletBinding(DefaultParameterSetName='Existing')]
+	param (
+		#NewCert ParameterSet
+		[parameter(Mandatory=$false,ParameterSetName='New')]
+		[switch]$CertAddServerAuth,
+
+		[parameter(Mandatory=$false,ParameterSetName='New')]
+		[switch]$CertAddClientAuth,
+
+		[parameter(Mandatory=$false,ParameterSetName='New')]
+		[switch]$CertAddSmartCardAuth,
+
+		[parameter(Mandatory=$false,ParameterSetName='New')]
+		[switch]$CertAddEncryptedFileSystem,
+
+		[parameter(Mandatory=$false,ParameterSetName='New')]
+		[switch]$CertAddCodeSigning,
+
+		[parameter(Mandatory=$true,ParameterSetName='New')]
+		$CertSubject,
+
+		[parameter(Mandatory=$false,ParameterSetName='New')]
+		$CertKeyLength,
+
+		[parameter(Mandatory=$false,ParameterSetName='New')]
+		$CertHashAlgorithm,
+
+		[parameter(Mandatory=$false,ParameterSetName='New')]
+		$CertKeyExportPolicy,
+
+		[parameter(Mandatory=$false,ParameterSetName='New')]
+		$CertExpirationInYears,
+
+		#Existing Cert ParameterSet
+		[parameter(Mandatory=$true,ParameterSetName='Existing')]
+		$StringToEncrypt,
+
+		[parameter(Mandatory=$true,ParameterSetName='Existing')]
+		$CertStoreLocation,
+
+		[parameter(Mandatory=$true,ParameterSetName='Existing')]
+		$CertThumbprint,
+
+		#Shared Params
+		[parameter(Mandatory=$true,ParameterSetName='New')]
+		[parameter(Mandatory=$true,ParameterSetName='Existing')]
+		$OutputLocation,
+
+		[parameter(Mandatory=$true,ParameterSetName='New')]
+		[parameter(Mandatory=$true,ParameterSetName='Existing')]
+		$FileName
+	)
+
+	if ($PSCmdlet.ParameterSetName -eq "New") {
+		$newCertificateParams = @{
+			CertificateStore = $CertStoreLocation
+			CertificateSubject = $CertSubject
+			SignatureAlgorithm = $CertHashAlgorithm
+			CertificateExpirationInYears = $CertExpirationInYears
+			CertificateLength = $CertKeyLength
+			CertificateExportable = $CertKeyExportPolicy
+		}
+
+		if ($CertAddServerAuth)
+		{
+			$newCertificateParams += @{AddServerAuth = $true}
+		}
+
+		if ($CertAddClientAuth)
+		{
+			$newCertificateParams += @{AddClientAuth = $true}
+		}
+
+		if ($CertAddSmartCardAuth)
+		{
+			$newCertificateParams += @{AddSmartCardAuth = $true}
+		}
+
+		if ($CertAddEncryptedFileSystem)
+		{
+			$newCertificateParams += @{AddEncryptedFileSystem = $true}
+		}
+
+		if ($CertAddCodeSigning)
+		{
+			$newCertificateParams += @{AddCodeSigning = $true}
+		}
+
+		$newCertificate = New-SelfSignedCert @newCertificateParams
+	} elseif ($PSCmdlet.ParameterSetName -eq "Existing") {
+		$newCertificate = Get-ChildItem $CertStoreLocation\$CertThumbprint
+	}
+
+	$StringInfo = Encrypt-Asymmetric -ClearText $StringToEncrypt -PublicCertFilePath "$CertStoreLocation\$($newCertificate.Thumbprint)"
+
+	$StringOutput = [PSCustomObject]@{
+		EncryptedKeyInBase64 = [Convert]::ToBase64String($StringInfo.EncryptedKeyInBase64) # byte array to base64 string
+		EncryptedString = $StringInfo.EncryptedString
+		Thumbprint = $StringInfo.Thumbprint
+	}
+
+	$StringOutput | Export-Csv $OutputLocation\$FileName -NoTypeInformation
+
+	Invoke-Item $OutputLocation\$FileName
+}
+
+
+#----------------------------------------------------#
 # Decrypts password using Certificate
 #----------------------------------------------------#
 function Get-DecryptedPassword
@@ -266,148 +420,6 @@ Function Encrypt-Asymmetric
 	}
 
 	Return $encryptedInfo
-}
-
-
-#----------------------------------------------------#
-# String Encryption Script
-#----------------------------------------------------#
-function New-EncryptedString
-{
-	<# Params for encryption against a new certificate that needs to be created.
-	$params = @{
-		StringToEncrypt = 'String Goes Here'
-		CertSubject = 'Subject Name'
-		CertKeyLength = 2048
-		CertHashAlgorithm = 'SHA256'
-		CertKeyExportPolicy = '1'
-		CertExpirationInYears = 30
-		CertStoreLocation = 'Cert:\LocalMachine\My'
-		CertKeyUsage = 'KeyEncipherment'
-		CertKeyUsageProperty = 'All'
-		CertKeySpec = 'KeyExchange'
-		OutputLocation = "$env:USERPROFILE"
-		FileName = 'EncryptionInfo.csv'
-	}
-	#
-
-	# Params for encryption against existing certificate
-	$params = @{
-		StringToEncrypt = 'String Goes Here'
-		CertStoreLocation = 'Cert:\LocalMachine\My'
-		CertThumbprint = 'Thumbprint goes here'
-		OutputLocation = "$env:USERPROFILE"
-		FileName = 'EncryptionInfo.csv'
-	}
-
-	New-EncryptedString @params
-	#>
-	[CmdletBinding(DefaultParameterSetName='Existing')]
-	param
-	(
-		#NewCert ParameterSet
-		[parameter(Mandatory=$false,ParameterSetName='New')]
-		[switch]$CertAddServerAuth,
-
-		[parameter(Mandatory=$false,ParameterSetName='New')]
-		[switch]$CertAddClientAuth,
-
-		[parameter(Mandatory=$false,ParameterSetName='New')]
-		[switch]$CertAddSmartCardAuth,
-
-		[parameter(Mandatory=$false,ParameterSetName='New')]
-		[switch]$CertAddEncryptedFileSystem,
-
-		[parameter(Mandatory=$false,ParameterSetName='New')]
-		[switch]$CertAddCodeSigning,
-
-		[parameter(Mandatory=$true,ParameterSetName='New')]
-		$CertSubject,
-
-		[parameter(Mandatory=$false,ParameterSetName='New')]
-		$CertKeyLength,
-
-		[parameter(Mandatory=$false,ParameterSetName='New')]
-		$CertHashAlgorithm,
-
-		[parameter(Mandatory=$false,ParameterSetName='New')]
-		$CertKeyExportPolicy,
-
-		[parameter(Mandatory=$false,ParameterSetName='New')]
-		$CertExpirationInYears,
-
-		#Existing Cert ParameterSet
-		[parameter(Mandatory=$true,ParameterSetName='Existing')]
-		$StringToEncrypt,
-
-		[parameter(Mandatory=$true,ParameterSetName='Existing')]
-		$CertStoreLocation,
-
-		[parameter(Mandatory=$true,ParameterSetName='Existing')]
-		$CertThumbprint,
-
-		#Shared Params
-		[parameter(Mandatory=$true,ParameterSetName='New')]
-		[parameter(Mandatory=$true,ParameterSetName='Existing')]
-		$OutputLocation,
-
-		[parameter(Mandatory=$true,ParameterSetName='New')]
-		[parameter(Mandatory=$true,ParameterSetName='Existing')]
-		$FileName
-
-	)
-
-	if ($PSCmdlet.ParameterSetName -eq "New") {
-		$newCertificateParams = @{
-			CertificateStore = $CertStoreLocation
-			CertificateSubject = $CertSubject
-			SignatureAlgorithm = $CertHashAlgorithm
-			CertificateExpirationInYears = $CertExpirationInYears
-			CertificateLength = $CertKeyLength
-			CertificateExportable = $CertKeyExportPolicy
-		}
-
-		if ($CertAddServerAuth)
-		{
-			$newCertificateParams += @{AddServerAuth = $true}
-		}
-
-		if ($CertAddClientAuth)
-		{
-			$newCertificateParams += @{AddClientAuth = $true}
-		}
-
-		if ($CertAddSmartCardAuth)
-		{
-			$newCertificateParams += @{AddSmartCardAuth = $true}
-		}
-
-		if ($CertAddEncryptedFileSystem)
-		{
-			$newCertificateParams += @{AddEncryptedFileSystem = $true}
-		}
-
-		if ($CertAddCodeSigning)
-		{
-			$newCertificateParams += @{AddCodeSigning = $true}
-		}
-
-		$newCertificate = New-SelfSignedCert @newCertificateParams
-	} elseif ($PSCmdlet.ParameterSetName -eq "Existing") {
-		$newCertificate = Get-ChildItem $CertStoreLocation\$CertThumbprint
-	}
-
-	$StringInfo = Encrypt-Asymmetric -ClearText $StringToEncrypt -PublicCertFilePath "$CertStoreLocation\$($newCertificate.Thumbprint)"
-
-	$StringOutput = [PSCustomObject]@{
-		EncryptedKeyInBase64 = [Convert]::ToBase64String($StringInfo.EncryptedKeyInBase64) # byte array to base64 string
-		EncryptedString = $StringInfo.EncryptedString
-		Thumbprint = $StringInfo.Thumbprint
-	}
-
-	$StringOutput | Export-Csv $OutputLocation\$FileName -NoTypeInformation
-
-	Invoke-Item $OutputLocation\$FileName
 }
 
 function Remove-CertPrivateKey
